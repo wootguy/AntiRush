@@ -36,6 +36,11 @@ PlayerState@ getPlayerState(CBasePlayer@ plr)
 bool needs_init = true;
 bool can_rush = true;
 bool has_level_end_ent = false;
+bool level_change_triggered = false;
+bool everyone_finish_triggered = false;
+CScheduledFunction@ constant_check = null;
+CScheduledFunction@ change_trigger = null;
+CScheduledFunction@ ten_sec_trigger = null;
 string reason = "";
 
 void init()
@@ -76,22 +81,46 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 	int needPlayers = int(ceil(float(needed/100.0) * float(total)) - int(finished)); 
 	string plrTxt = needPlayers == 1 ? "player" : "players";
 	
+	bool everyoneFinished = percentage >= 100;
+	
+	if (level_change_triggered and (everyone_finish_triggered or !everyoneFinished))
+		return;
+	
 	string msg = "";
 	if (printFinished)
-		msg = "" + plr.pev.netname + " finished the map. ";
+	{
+		if (everyoneFinished)
+			msg = "" + plr.pev.netname + " finished the map. Everyone has finished now. ";
+		else
+			msg = "" + plr.pev.netname + " finished the map. ";
+	}
 	else
 		msg = "" + percentage + "% finished the map. ";
 	
 	bool isEnough = percentage >= needed;
-	if (isEnough)
+	if (isEnough or everyoneFinished)
 	{
 		CBaseEntity@ ent = changelevelEnt;
+		float delay = everyoneFinished ? 3.0f : g_finishDelay.GetFloat();
 		if (string(ent.pev.targetname).Length() > 0)
-			msg += "Level changing in " + g_finishDelay.GetFloat() + " seconds.";
+			msg += "Level changing in " + delay + " seconds.";
 		else
-			msg += "Level change allowed in " + g_finishDelay.GetFloat() + " seconds.";
+			msg += "Level change allowed in " + delay + " seconds.";
+		
+		if (everyoneFinished)
+		{
+			everyone_finish_triggered = true;
+			g_Scheduler.SetTimeout("triggerNextLevel", 3.0f, @plr);
+		}
+		else
+		{
+			@change_trigger = g_Scheduler.SetTimeout("triggerNextLevel", delay, @plr);
+			if (delay >= 20)
+				@ten_sec_trigger = g_Scheduler.SetTimeout(@g_PlayerFuncs, "SayTextAll", delay-10, @plr, "Level changing in 10 seconds.");
+		}
 			
-		g_Scheduler.SetTimeout("triggerNextLevel", g_finishDelay.GetFloat(), @plr);
+		
+		level_change_triggered = true;
 	}
 	else
 		msg += "" + needPlayers + " more " + plrTxt + " needed for level change.";	
@@ -103,7 +132,8 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 
 void triggerNextLevel(CBasePlayer@ plr)
 {
-	//if(1==1)return;
+	if (!level_change_triggered)
+		return;
 	if (changelevelBut)
 	{
 		CBaseEntity@ but = changelevelBut;
@@ -363,7 +393,7 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 				*/
 				can_rush = false;
 				has_level_end_ent = true;
-				g_Scheduler.SetInterval("checkPlayerFinish", 0.05);
+				@constant_check = g_Scheduler.SetInterval("checkPlayerFinish", 0.05);
 			}
 		}
 	} while (ent !is null);
@@ -389,8 +419,8 @@ void PluginInit()
 	
 	g_Scheduler.SetTimeout("init", 0.5);
 	
-	@g_finishPercent = CCVar("percent", 51, "Percentage of players needed for level change", ConCommandFlag::AdminOnly);
-	@g_finishDelay = CCVar("delay", 5.0f, "Seconds to wait before changing level", ConCommandFlag::AdminOnly);
+	@g_finishPercent = CCVar("percent", 75, "Percentage of players needed for level change", ConCommandFlag::AdminOnly);
+	@g_finishDelay = CCVar("delay", 30.0f, "Seconds to wait before changing level", ConCommandFlag::AdminOnly);
 }
 
 void MapInit()
@@ -403,7 +433,15 @@ HookReturnCode MapChange()
 	changelevelBut = null;
 	changelevelEnt = null;
 	needs_init = true;
+	level_change_triggered = false;
+	everyone_finish_triggered = false;
 	player_states.deleteAll();
+	g_Scheduler.RemoveTimer(constant_check);
+	g_Scheduler.RemoveTimer(ten_sec_trigger);
+	g_Scheduler.RemoveTimer(change_trigger);
+	@ten_sec_trigger = null;
+	@change_trigger = null;
+	@constant_check = null;
 	return HOOK_CONTINUE;
 }
 
