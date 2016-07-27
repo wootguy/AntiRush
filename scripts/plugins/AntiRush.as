@@ -12,6 +12,8 @@ bool debug_mode = false;
 
 CCVar@ g_finishPercent;
 CCVar@ g_finishDelay;
+CCVar@ g_timerMode;
+CCVar@ g_disabled;
 
 // Will create a new state if the requested one does not exit
 PlayerState@ getPlayerState(CBasePlayer@ plr)
@@ -47,6 +49,11 @@ void init()
 {
 	if (!needs_init)
 		return;
+	if (g_disabled.GetBool())
+	{
+		reason = "disabled by cvar";
+		return;
+	}
 	needs_init = false;
 	populatePlayerStates();
 	checkForChangelevel("trigger_changelevel");
@@ -57,10 +64,9 @@ void init()
 EHandle changelevelEnt;
 EHandle changelevelBut;
 
-void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
+void getRushStats(int &out percentage, int &out neededPercent, int &out needPlayers)
 {
 	array<string>@ stateKeys = player_states.getKeys();
-	
 	float total = 0;
 	float finished = 0;
 	for (uint i = 0; i < stateKeys.length(); i++)
@@ -76,28 +82,48 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 				finished++;
 		}
 	}
-	int percentage = finished > 0 ? int((finished / total)*100.0) : 0;
-	int needed = g_finishPercent.GetInt();
-	int needPlayers = int(ceil(float(needed/100.0) * float(total)) - int(finished)); 
+	
+	percentage = finished > 0 ? int((finished / total)*100.0) : 0;
+	neededPercent = g_finishPercent.GetInt();
+	needPlayers = int(ceil(float(neededPercent/100.0) * float(total)) - int(finished)); 
+}
+
+void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
+{
+	bool alternateMode = g_timerMode.GetBool();
+	
+	int percentage, neededPercent, needPlayers = 0;
+	getRushStats(percentage, neededPercent, needPlayers);
 	string plrTxt = needPlayers == 1 ? "player" : "players";
 	
-	bool everyoneFinished = percentage >= 100;
+	bool isEnough = percentage >= neededPercent or (alternateMode and percentage > 0);
+	bool everyoneFinished = percentage >= 100 or (alternateMode and percentage >= neededPercent);
 	
 	if (level_change_triggered and (everyone_finish_triggered or !everyoneFinished))
+	{
+		if (alternateMode and plr !is null)
+		{
+			if (everyoneFinished)
+				g_PlayerFuncs.SayText(plr, "You finished the map.");
+			else
+				g_PlayerFuncs.SayText(plr, "You finished the map. " + needPlayers + " " + plrTxt + " needed for instant level change.");
+		}
 		return;
+	}
 	
 	string msg = "";
 	if (printFinished)
 	{
-		if (everyoneFinished)
+		if (everyoneFinished && percentage >= 100)
+		{
 			msg = "" + plr.pev.netname + " finished the map. Everyone has finished now. ";
+		}
 		else
 			msg = "" + plr.pev.netname + " finished the map. ";
 	}
 	else
 		msg = "" + percentage + "% finished the map. ";
 	
-	bool isEnough = percentage >= needed;
 	if (isEnough or everyoneFinished)
 	{
 		CBaseEntity@ ent = changelevelEnt;
@@ -123,7 +149,7 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 		level_change_triggered = true;
 	}
 	else
-		msg += "" + needPlayers + " more " + plrTxt + " needed for level change.";	
+		msg += "" + needPlayers + " " + plrTxt + " needed for level change.";	
 	
 	if (percentage == 0)
 		return; // don't bother saying nobody finished
@@ -143,16 +169,25 @@ void triggerNextLevel(CBasePlayer@ plr)
 	else if (changelevelEnt)
 	{
 		CBaseEntity@ ent = changelevelEnt;
+		ent.pev.solid = SOLID_TRIGGER;
 		if (string(ent.pev.targetname).Length() > 0)
 			g_EntityFuncs.FireTargets(ent.pev.targetname, plr, plr, USE_TOGGLE);
 		else
 		{
 			g_PlayerFuncs.SayTextAll(plr, "Level change trigger enabled. Reach the end of the map again to change levels.");
 			ent.pev.solid = SOLID_TRIGGER;
+			
+			// Possible bug fix: Enable all the solid triggers!!!
+			CBaseEntity@ ent2 = null;
+			do {
+				@ent2 = g_EntityFuncs.FindEntityByClassname(ent2, "trigger_changelevel"); 
+				if (ent2 !is null)
+					ent2.pev.solid = SOLID_TRIGGER;
+			} while (ent2 !is null);
 		}
 	}
 	else
-		println("Something went horribly wrong (trigger_changelevel disappeared). Level change aborted.");
+		g_PlayerFuncs.SayTextAll(plr, "Something went horribly wrong (trigger_changelevel disappeared?). Level change failed.");	
 }
 
 void checkPlayerFinish()
@@ -421,11 +456,13 @@ void PluginInit()
 	
 	@g_finishPercent = CCVar("percent", 75, "Percentage of players needed for level change", ConCommandFlag::AdminOnly);
 	@g_finishDelay = CCVar("delay", 30.0f, "Seconds to wait before changing level", ConCommandFlag::AdminOnly);
+	@g_timerMode = CCVar("mode", 1, "0 = Timer starts when 'percent' of players finish. 1 = Timer starts when first player finishes", ConCommandFlag::AdminOnly);
+	@g_disabled = CCVar("disabled", 1, "disables anti-rush for the current map", ConCommandFlag::AdminOnly);
 }
 
 void MapInit()
 {
-	g_Scheduler.SetTimeout("init", 0.5);
+	g_Scheduler.SetTimeout("init", 2);
 }
 
 HookReturnCode MapChange()
@@ -483,84 +520,63 @@ void populatePlayerStates()
 	} while (ent !is null);
 }
 
-HookReturnCode ClientSay( SayParameters@ pParams )
-{
-	CBasePlayer@ plr = pParams.GetPlayer();
-	const CCommand@ pArguments = pParams.GetArguments();
 
-	bool debug = true;
+bool doCommand(CBasePlayer@ plr, const CCommand@ args)
+{
+	PlayerState@ state = getPlayerState(plr);
 	
-	if ( pArguments.ArgC() >= 1 )
+	if ( args.ArgC() > 0 )
 	{
-		if ( pArguments[0] == ".rush" )
+		if ( args[0] == ".rush" )
 		{
 			if (can_rush)
-				g_PlayerFuncs.SayText(plr, "Anti-rush does not work on this map (" + reason + ").");
+				g_PlayerFuncs.SayText(plr, "Anti-rush is disabled for this map (" + reason + ").");
 			else
 			{
-				array<string>@ stateKeys = player_states.getKeys();
-				float total = 0;
-				float finished = 0;
-				for (uint i = 0; i < stateKeys.length(); i++)
-				{
-					PlayerState@ state = cast<PlayerState@>( player_states[stateKeys[i]] );
-					CBaseEntity@ ent = state.plr;
-					CBasePlayer@ p = cast<CBasePlayer@>(ent);
-					Observer@ observer = p.GetObserver();
-					if (state.inGame && !observer.IsObserver())
-					{
-						total++;
-						if (state.finished)
-							finished++;
-					}
-				}
+				int percentage, neededPercent, needPlayers = 0;
+				getRushStats(percentage, neededPercent, needPlayers);
 				
-				int percentage = finished > 0 ? int((finished / total)*100.0) : 0;
-				int needed = g_finishPercent.GetInt();
-				int needPlayers = int(ceil(float(needed/100.0) * float(total)) - int(finished)); 
 			
 				string plrTxt = needPlayers == 1 ? "player" : "players";
-				string msg = "Anti-rush is enabled for this map. " + needPlayers + " more " + plrTxt + " needed to finish.";
+				string msg;
+				if (g_timerMode.GetBool())
+					msg = "Anti-rush is enabled for this map (" + neededPercent + "%). " + needPlayers + " " + plrTxt + " needed for instant level change.";
+				else
+					msg = "Anti-rush is enabled for this map (" + neededPercent + "%). " + needPlayers + " " + plrTxt + " needed to finish.";
+					
 				if (getPlayerState(plr).finished)
 					msg += " You've finished already.";
 				else
 					msg += " You haven't finished yet.";
 				g_PlayerFuncs.SayText(plr, msg);
 			}
-			pParams.ShouldHide = true;
+			return true;
 		}
+	}
+	return false;
+}
+
+HookReturnCode ClientSay( SayParameters@ pParams )
+{	
+	CBasePlayer@ plr = pParams.GetPlayer();
+	const CCommand@ args = pParams.GetArguments();
+	
+	if (doCommand(plr, args))
+	{
+		pParams.ShouldHide = true;
+		return HOOK_HANDLED;
 	}
 	
 	return HOOK_CONTINUE;
 }
 
-void print(string text) { g_Game.AlertMessage( at_console, text); }
-void println(string text) { print(text + "\n"); }
+CClientCommand _rush("rush", "Anti-rush status", @consoleCmd );
 
-void te_explosion(Vector pos, string sprite="sprites/zerogxplode.spr", int scale=10, int frameRate=15, int flags=0, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null) { NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);m.WriteByte(TE_EXPLOSION);m.WriteCoord(pos.x);m.WriteCoord(pos.y);m.WriteCoord(pos.z);m.WriteShort(g_EngineFuncs.ModelIndex(sprite));m.WriteByte(scale);m.WriteByte(frameRate);m.WriteByte(flags);m.End(); }
-void te_sprite(Vector pos, string sprite="sprites/zerogxplode.spr", uint8 scale=10, uint8 alpha=200, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null) { NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);m.WriteByte(TE_SPRITE);m.WriteCoord(pos.x); m.WriteCoord(pos.y);m.WriteCoord(pos.z);m.WriteShort(g_EngineFuncs.ModelIndex(sprite));m.WriteByte(scale); m.WriteByte(alpha);m.End();}
-void te_beampoints(Vector start, Vector end, string sprite="sprites/laserbeam.spr", uint8 frameStart=0, uint8 frameRate=100, uint8 life=1, uint8 width=2, uint8 noise=0, Color c=GREEN, uint8 scroll=32, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null) { NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);m.WriteByte(TE_BEAMPOINTS);m.WriteCoord(start.x);m.WriteCoord(start.y);m.WriteCoord(start.z);m.WriteCoord(end.x);m.WriteCoord(end.y);m.WriteCoord(end.z);m.WriteShort(g_EngineFuncs.ModelIndex(sprite));m.WriteByte(frameStart);m.WriteByte(frameRate);m.WriteByte(life);m.WriteByte(width);m.WriteByte(noise);m.WriteByte(c.r);m.WriteByte(c.g);m.WriteByte(c.b);m.WriteByte(c.a);m.WriteByte(scroll);m.End(); }
-
-class Color
-{ 
-	uint8 r, g, b, a;
-	Color() { r = g = b = a = 0; }
-	Color(uint8 r, uint8 g, uint8 b) { this.r = r; this.g = g; this.b = b; this.a = 255; }
-	Color(uint8 r, uint8 g, uint8 b, uint8 a) { this.r = r; this.g = g; this.b = b; this.a = a; }
-	Color(float r, float g, float b, float a) { this.r = uint8(r); this.g = uint8(g); this.b = uint8(b); this.a = uint8(a); }
-	Color (Vector v) { this.r = uint8(v.x); this.g = uint8(v.y); this.b = uint8(v.z); this.a = 255; }
-	string ToString() { return "" + r + " " + g + " " + b + " " + a; }
-	Vector getRGB() { return Vector(r, g, b); }
+void consoleCmd( const CCommand@ args )
+{
+	CBasePlayer@ plr = g_ConCommandSystem.GetCurrentPlayer();
+	doCommand(plr, args);
 }
 
-Color RED    = Color(255,0,0);
-Color GREEN  = Color(0,255,0);
-Color BLUE   = Color(0,0,255);
-Color YELLOW = Color(255,255,0);
-Color ORANGE = Color(255,127,0);
-Color PURPLE = Color(127,0,255);
-Color PINK   = Color(255,0,127);
-Color TEAL   = Color(0,255,255);
-Color WHITE  = Color(255,255,255);
-Color BLACK  = Color(0,0,0);
-Color GRAY  = Color(127,127,127);
+void print(string text) { g_Game.AlertMessage( at_console, text); }
+void println(string text) { print(text + "\n"); }
