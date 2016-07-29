@@ -40,6 +40,7 @@ bool can_rush = true;
 bool has_level_end_ent = false;
 bool level_change_triggered = false;
 bool everyone_finish_triggered = false;
+bool level_change_active = false;
 CScheduledFunction@ constant_check = null;
 CScheduledFunction@ change_trigger = null;
 CScheduledFunction@ ten_sec_trigger = null;
@@ -55,6 +56,7 @@ void init()
 		return;
 	}
 	needs_init = false;
+	level_change_active = false;
 	populatePlayerStates();
 	checkForChangelevel("trigger_changelevel");
 	if (can_rush && !has_level_end_ent)
@@ -86,6 +88,21 @@ void getRushStats(int &out percentage, int &out neededPercent, int &out needPlay
 	percentage = finished > 0 ? int((finished / total)*100.0) : 0;
 	neededPercent = g_finishPercent.GetInt();
 	needPlayers = int(ceil(float(neededPercent/100.0) * float(total)) - int(finished)); 
+}
+
+void doCountdown(string msg, int seconds)
+{
+	if (needs_init)
+		return;
+		
+	if (seconds < 1)
+	{
+		g_PlayerFuncs.PrintKeyBindingStringAll("");
+		return;
+	}
+		
+	g_PlayerFuncs.PrintKeyBindingStringAll(msg + seconds + " seconds.");
+	g_Scheduler.SetTimeout("doCountdown", 1, msg, seconds-1);
 }
 
 void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
@@ -128,7 +145,8 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 	{
 		CBaseEntity@ ent = changelevelEnt;
 		float delay = everyoneFinished ? 3.0f : g_finishDelay.GetFloat();
-		if (string(ent.pev.targetname).Length() > 0)
+		bool canTrigger = string(ent.pev.targetname).Length() > 0;
+		if (canTrigger)
 			msg += "Level changing in " + delay + " seconds.";
 		else
 			msg += "Level change allowed in " + delay + " seconds.";
@@ -140,9 +158,8 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 		}
 		else
 		{
+			doCountdown(canTrigger ? "Level changing in " : "Level change allowed in ", int(delay));
 			@change_trigger = g_Scheduler.SetTimeout("triggerNextLevel", delay, @plr);
-			if (delay >= 20)
-				@ten_sec_trigger = g_Scheduler.SetTimeout(@g_PlayerFuncs, "SayTextAll", delay-10, @plr, "Level changing in 10 seconds.");
 		}
 			
 		
@@ -176,6 +193,7 @@ void triggerNextLevel(CBasePlayer@ plr)
 		{
 			g_PlayerFuncs.SayTextAll(plr, "Level change trigger enabled. Reach the end of the map again to change levels.");
 			ent.pev.solid = SOLID_TRIGGER;
+			level_change_active = true;
 			
 			// Possible bug fix: Enable all the solid triggers!!!
 			CBaseEntity@ ent2 = null;
@@ -199,6 +217,17 @@ void checkPlayerFinish()
 		@ent = g_EntityFuncs.FindEntityByClassname(ent, "player"); 
 		if (ent !is null)
 		{
+			CBasePlayer@ plr = cast<CBasePlayer@>(ent);
+			PlayerState@ state = getPlayerState(plr);
+			
+			if (state.finished)
+			{
+				ent.pev.solid = level_change_active ? SOLID_SLIDEBOX : SOLID_NOT;
+				ent.pev.rendermode = kRenderTransTexture;
+				ent.pev.renderamt = 128;
+				//ent.pev.renderfx = kRenderFxHologram;
+			}
+			
 			CBaseEntity@ changelevel = changelevelEnt;
 			if (changelevel is null)
 				return;
@@ -216,8 +245,6 @@ void checkPlayerFinish()
 			
 			if (touching or pressedBut)
 			{
-				CBasePlayer@ plr = cast<CBasePlayer@>(ent);
-				PlayerState@ state = getPlayerState(plr);
 				plr.pev.iuser4 = 0;
 				if (!state.finished)
 				{
@@ -457,7 +484,7 @@ void PluginInit()
 	@g_finishPercent = CCVar("percent", 75, "Percentage of players needed for level change", ConCommandFlag::AdminOnly);
 	@g_finishDelay = CCVar("delay", 30.0f, "Seconds to wait before changing level", ConCommandFlag::AdminOnly);
 	@g_timerMode = CCVar("mode", 1, "0 = Timer starts when 'percent' of players finish. 1 = Timer starts when first player finishes", ConCommandFlag::AdminOnly);
-	@g_disabled = CCVar("disabled", 1, "disables anti-rush for the current map", ConCommandFlag::AdminOnly);
+	@g_disabled = CCVar("disabled", 0, "disables anti-rush for the current map", ConCommandFlag::AdminOnly);
 }
 
 void MapInit()
@@ -495,12 +522,6 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 	if (plr is null)
 		return HOOK_CONTINUE;
 	PlayerState@ state = getPlayerState(plr);
-	/*
-	if (!state.inGame)
-		println("" + plr.pev.netname + " rejoined after leaving");
-	else
-		println("" + plr.pev.netname + " joined for the first time");
-	*/
 	state.inGame = true;
 	g_Scheduler.SetTimeout("checkEnoughPlayersFinished", 2, @plr, false);
 	return HOOK_CONTINUE;
