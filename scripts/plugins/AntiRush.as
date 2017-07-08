@@ -193,15 +193,8 @@ void triggerNextLevel(CBasePlayer@ plr)
 		{
 			g_PlayerFuncs.SayTextAll(plr, "Level change trigger enabled. Reach the end of the map again to change levels.");
 			ent.pev.solid = SOLID_TRIGGER;
+			g_EntityFuncs.SetOrigin(ent, ent.pev.origin); // This fixes the random failures somehow. Thanks, Protector.
 			level_change_active = true;
-			
-			// Possible bug fix: Enable all the solid triggers!!!
-			CBaseEntity@ ent2 = null;
-			do {
-				@ent2 = g_EntityFuncs.FindEntityByClassname(ent2, "trigger_changelevel"); 
-				if (ent2 !is null)
-					ent2.pev.solid = SOLID_TRIGGER;
-			} while (ent2 !is null);
 		}
 	}
 	else
