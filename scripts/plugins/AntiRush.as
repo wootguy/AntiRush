@@ -350,6 +350,9 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 								//println("CALLER: " + caller.pev.classname);
 								if (caller.pev.classname == "func_button" or caller.pev.classname == "trigger_once" or caller.pev.classname == "trigger_multiple")
 								{
+									CBaseToggle@ toggle = cast<CBaseToggle@>(caller);
+									string master = toggle.m_sMaster;
+										
 									if (caller.pev.classname == "func_button")
 									{
 										dictionary keys;
@@ -360,9 +363,7 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 										keys["model"] = string(caller.pev.model);
 										keys["origin"] = caller.pev.origin.ToString();
 										keys["angles"] = caller.pev.angles.ToString();
-									
-										CBaseButton@ button = cast<CBaseButton@>(caller);
-										keys["master"] = string(button.m_sMaster);
+										keys["master"] = master;
 										
 										CBaseEntity@ newButton = g_EntityFuncs.CreateEntity("func_button", keys);
 										changelevelBut = newButton;	
@@ -378,6 +379,7 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 										keys["model"] = string(caller.pev.model);
 										keys["origin"] = caller.pev.origin.ToString();
 										keys["angles"] = caller.pev.angles.ToString();
+										keys["master"] = master;
 										
 										CBaseEntity@ newButton = g_EntityFuncs.CreateEntity("trigger_multiple", keys);
 										changelevelBut = newButton;	
