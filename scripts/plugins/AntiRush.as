@@ -63,7 +63,7 @@ void init()
 		checkForChangelevel("game_end");
 }
 
-EHandle changelevelEnt;
+array<EHandle> changelevelEnts;
 EHandle changelevelBut;
 
 void getRushStats(int &out percentage, int &out neededPercent, int &out needPlayers)
@@ -143,7 +143,7 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 	
 	if (isEnough or everyoneFinished)
 	{
-		CBaseEntity@ ent = changelevelEnt;
+		CBaseEntity@ ent = changelevelEnts[0];
 		float delay = everyoneFinished ? 3.0f : g_finishDelay.GetFloat();
 		bool canTrigger = string(ent.pev.targetname).Length() > 0;
 		if (canTrigger)
@@ -180,19 +180,21 @@ void triggerNextLevel(CBasePlayer@ plr)
 	if (changelevelBut)
 	{
 		CBaseEntity@ but = changelevelBut;
-		g_EntityFuncs.FireTargets(but.pev.noise1, plr, but, USE_TOGGLE);
+		but.pev.target = but.pev.noise1;
+		g_EntityFuncs.FireTargets(but.pev.target, plr, but, USE_TOGGLE);
 		//println("TRIGGER: " + but.pev.noise1);
 	}
-	else if (changelevelEnt)
+	else if (changelevelEnts.length() > 0)
 	{
-		CBaseEntity@ ent = changelevelEnt;
-		ent.pev.solid = SOLID_TRIGGER;
+		CBaseEntity@ ent = changelevelEnts[0];
 		if (string(ent.pev.targetname).Length() > 0)
 			g_EntityFuncs.FireTargets(ent.pev.targetname, plr, plr, USE_TOGGLE);
 		else
 		{
-			g_PlayerFuncs.SayTextAll(plr, "Level change trigger enabled. Reach the end of the map again to change levels.");
-			ent.pev.solid = SOLID_TRIGGER;
+			string plural = changelevelEnts.length() > 0 ? "triggers" : "trigger";
+			g_PlayerFuncs.SayTextAll(plr, "Level change " + plural + " enabled. Reach the end of the map again to change levels.");
+			for (uint i = 0; i < changelevelEnts.length(); i++)
+				changelevelEnts[i].GetEntity().pev.solid = SOLID_TRIGGER;
 			g_EntityFuncs.SetOrigin(ent, ent.pev.origin); // This fixes the random failures somehow. Thanks, Protector.
 			level_change_active = true;
 		}
@@ -203,7 +205,7 @@ void triggerNextLevel(CBasePlayer@ plr)
 
 void checkPlayerFinish()
 {
-	if (!changelevelEnt)
+	if (changelevelEnts.length() == 0)
 		return;
 	CBaseEntity@ ent = null;
 	do {
@@ -221,18 +223,23 @@ void checkPlayerFinish()
 				//ent.pev.renderfx = kRenderFxHologram;
 			}
 			
-			CBaseEntity@ changelevel = changelevelEnt;
-			if (changelevel is null)
-				return;
+			bool touching = false;
+			for (uint i = 0; i < changelevelEnts.length(); i++)
+			{
+				CBaseEntity@ changelevel = changelevelEnts[i];
+				if (changelevel is null)
+					continue;
+				
+				Vector amin = ent.pev.mins + ent.pev.origin;
+				Vector amax = ent.pev.maxs + ent.pev.origin;
+				Vector bmin = changelevel.pev.mins + changelevel.pev.origin;
+				Vector bmax = changelevel.pev.maxs + changelevel.pev.origin;
+				
+				touching = touching or amax.x > bmin.x && amin.x < bmax.x &&
+								amax.y > bmin.y && amin.y < bmax.y &&
+								amax.z > bmin.z && amin.z < bmax.z;
+			}
 			
-			Vector amin = ent.pev.mins + ent.pev.origin;
-			Vector amax = ent.pev.maxs + ent.pev.origin;
-			Vector bmin = changelevel.pev.mins + changelevel.pev.origin;
-			Vector bmax = changelevel.pev.maxs + changelevel.pev.origin;
-			
-			bool touching = amax.x > bmin.x && amin.x < bmax.x &&
-							amax.y > bmin.y && amin.y < bmax.y &&
-							amax.z > bmin.z && amin.z < bmax.z;
 			
 			bool pressedBut = changelevelBut && ent.pev.iuser4 == 1337;
 			
@@ -257,6 +264,22 @@ void checkPlayerFinish()
 	} while (ent !is null);
 }
 
+// is this an entity that a player can trigger
+bool isPlayerTrigger(CBaseEntity@ ent)
+{
+	string cname = ent.pev.classname;
+	
+	if (cname == "func_door" or cname == "func_door_rotating")
+	{
+		return ent.pev.targetname == "";
+	}
+	
+	return cname == "func_button" or
+			cname == "trigger_multiple" or
+			cname == "trigger_once" or 
+			cname == "item_suit";
+}
+
 CBaseEntity@ getCaller(string name, bool recurse=true)
 {
 	bool found = false;
@@ -264,7 +287,15 @@ CBaseEntity@ getCaller(string name, bool recurse=true)
 	CBaseEntity@ caller = null;
 	do {
 		@ent2 = g_EntityFuncs.FindEntityByClassname(ent2, "*"); 
-		if (ent2 !is null && string(ent2.pev.targetname) != name && (ent2.HasTarget(name) or ent2.pev.target == name))
+		if (ent2 is null)
+			break;
+		string cname = ent2.pev.classname;
+		if (ent2 !is null && string(ent2.pev.targetname) != name && 
+			(
+			((ent2.HasTarget(name) or ent2.pev.target == name) and !(cname == "trigger_copyvalue" or cname == "trigger_changevalue")) or 
+			(ent2.pev.message == name and (cname == "path_track" or cname == "path_corner" or cname == "trigger_condition" or cname == "trigger_copyvalue" or cname == "trigger_changevalue")) or
+			(ent2.pev.netname == name and (cname == "trigger_condition" or cname == "func_door" or cname == "func_door_rotating")) 
+			))
 		{			
 			if (ent2.pev.classname == "trigger_changelevel")
 				continue;
@@ -273,16 +304,29 @@ CBaseEntity@ getCaller(string name, bool recurse=true)
 				if (string(ent2.pev.classname).Find("func_") != 0 and string(ent2.pev.classname) != "trigger_once"
 					and string(ent2.pev.classname) != "trigger_multiple")
 				{
-					//println("Found entity with no caller: " + ent2.pev.targetname + " (" + ent2.pev.classname + ")");
+					println("Found entity with no caller: " + ent2.pev.targetname + " (" + ent2.pev.classname + ")");
 					continue;
 				}
 			}
 
+			//println("GOT CALLER: " + ent2.pev.targetname + " (" + ent2.pev.classname + ") --> " + name);
 			if (found)
 			{
-				//println("Multiple callers found " + ent2.pev.targetname + " (" + ent2.pev.classname + ") + " 
-				//		+ caller.pev.targetname + " (" + caller.pev.classname + ")");
-				return null; // don't handle multiple callers
+				if (isPlayerTrigger(ent2) and isPlayerTrigger(caller))
+				{
+					println("Multiple callers found " + ent2.pev.targetname + " (" + ent2.pev.classname + ") + " 
+						+ caller.pev.targetname + " (" + caller.pev.classname + ")");
+					return null; // don't handle multiple callers
+				}
+				if ((!isPlayerTrigger(ent2) and isPlayerTrigger(caller)) or 
+					(ent2.pev.classname == "path_track" and caller.pev.classname == "func_train"))
+				{
+					println("Ignoring lower priority caller: " + ent2.pev.targetname + " (" + 
+							ent2.pev.classname + ")");
+					continue;
+				}
+				//println("Replacing " + caller.pev.targetname + " (" + caller.pev.classname + ") WITH " 
+				//		+ ent2.pev.targetname + " (" + ent2.pev.classname + ")");
 			}
 			found = true;
 			@caller = @ent2;
@@ -291,6 +335,9 @@ CBaseEntity@ getCaller(string name, bool recurse=true)
 	
 	return caller;
 }
+
+// TODO:
+// of2a5 - multiple changelevels. Needs to work even tho 2/3 have no trigger
 
 void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 {
@@ -302,19 +349,28 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 		@ent = g_EntityFuncs.FindEntityByClassname(ent, endLevelEntName); 
 		if (ent !is null)
 		{
-			if (found)
+			if (found and ent.pev.classname != "trigger_changelevel")
 			{
+				println("FOUND ANOTHER: " + ent.pev.classname);
 				can_rush = true;
 				reason = "multiple trigger_changelevels found";
 				return;
 			}
 			found = true;
 			bool isTriggered = (ent.pev.spawnflags & 2) != 0;
+			if (isTriggered and ent.pev.classname == "trigger_changelevel" and 
+				(ent.pev.targetname == "" or getCaller(ent.pev.targetname, false) is null))
+			{
+				// trigger-only but not triggered by anything!? (TODO: use it anyway if it's the only one)
+				println("Skipping trigger_changelevel that's not tirggered by anything");
+				continue;
+			}
 			string tname = ent.pev.targetname;
 
 			// check for any entities that trigger this changelevel
 			if (tname.Length() > 0)
 			{
+				println("Anything triggers?");
 				CBaseEntity@ ent2 = null;
 				do {
 					@ent2 = g_EntityFuncs.FindEntityByClassname(ent2, "*"); 
@@ -331,15 +387,17 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 						//println("UHHHHHHHHHH " + ent2.pev.targetname);
 						if (string(ent2.pev.classname).Find("func_") != 0 or true)
 						{
-							//println("ANYTHING CALLS? " + ent2.pev.targetname);
+							println("ANYTHING CALLS? " + ent2.pev.targetname);
 							CBaseEntity@ caller;
 							if (string(ent2.pev.targetname).Length() > 0)
 								@caller = getCaller(ent2.pev.targetname);
 							else
 								@caller = @ent2;
 							
-							for (int i = 0; i < 64 && caller !is null; i++)
+							for (int i = 0; i < 66 && caller !is null; i++)
 							{
+								if (caller.pev.targetname == "")
+									break;
 								if (caller.pev.classname == "func_button" or caller.pev.classname == "trigger_once" or caller.pev.classname == "trigger_multiple")
 									break;
 								@caller = getCaller(caller.pev.targetname);
@@ -347,7 +405,7 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 							
 							if (caller !is null)
 							{
-								//println("CALLER: " + caller.pev.classname);
+								println("CALLER: " + caller.pev.targetname + " (" + caller.pev.classname + ")");
 								if (caller.pev.classname == "func_button" or caller.pev.classname == "trigger_once" or caller.pev.classname == "trigger_multiple")
 								{
 									CBaseToggle@ toggle = cast<CBaseToggle@>(caller);
@@ -370,8 +428,15 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 									}
 									if (caller.pev.classname == "trigger_once" or caller.pev.classname == "trigger_multiple")
 									{
-										if (caller.pev.spawnflags & 2 != 0)
+										if (caller.pev.spawnflags & 2 != 0) {
+											int flags = caller.pev.spawnflags & 15; // don't care about fire on enter/exit
+											println("NOT MEANT TO TOUCH THIS " + caller.pev.spawnflags);
+											if (flags == 6)
+												reason = "map change triggered by pushable object";
+											if (flags == 3)
+												reason = "map change triggered by monster";
 											continue; // dont handle triggers that clients arent meant to touch
+										}
 										dictionary keys;
 										keys["target"] = string("ANTIRUSH_PLAYER_FINISH");
 										keys["noise1"] = string(caller.pev.target);
@@ -404,14 +469,6 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 						}
 						
 					}
-					/*
-					if (ent2 !is null and (ent2.pev.classname == "env_laser" or ent2.pev.classname == "env_beam" or ent2.pev.classname == "env_spark" or ent2.pev.classname == "func_door"))
-					{
-						println("LOL BEAM");
-						ent2.pev.targetname == "LOL_TEST";
-						g_EntityFuncs.FireTargets(ent2.pev.targetname, null, null, USE_TOGGLE);
-					}
-					*/
 				} while (ent2 !is null);	
 			}			
 			
@@ -436,7 +493,7 @@ void checkForChangelevel(string endLevelEntName="trigger_changelevel")
 			{
 				// it's a normal changelevel you just walk into
 				ent.pev.solid = SOLID_NOT;
-				changelevelEnt = ent;
+				changelevelEnts.insertLast(EHandle(ent));
 				//ent.pev.targetname = "maprush_plugin_trigger";
 				//g_EntityFuncs.DispatchKeyValue(ent.edict(), "targetname", "maprush_plugin_trigger");
 				/*
@@ -490,7 +547,7 @@ void MapInit()
 HookReturnCode MapChange()
 {
 	changelevelBut = null;
-	changelevelEnt = null;
+	changelevelEnts.resize(0);
 	needs_init = true;
 	level_change_triggered = false;
 	everyone_finish_triggered = false;
