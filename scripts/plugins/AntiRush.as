@@ -1,13 +1,17 @@
 // Issues:
-// of3a1: only 1 player can enter the portal, so won't work with rush.mode 0
+// of0a0: Intro cutscene, not possible to rush this.
+// of1a5: Tram ride, not possible to rush this.
+// of2a4: Elevator button counts as finishing the level. Impossible to fix without ripent.
 // of6a4: level change in vent is disabled (because of map keyvalue?), and there's no way the plugin can know that
-// ba_elevator: Not really possible to rush this, it just delays the level change for no good reason
+// ba_tram1/2/3: Not needed and and not supported
+// ba_elevator: Not needed, just delays cutscene
 // ba_canal2: Level changes to whichever changelevel was touched last (potential for trolling)
 // ba_yard4: Not sure if this works in the rosenberg mode. I can't get it to load right even without antirush
 // ba_teleport2: Not sure if this works after power cell maps. Can't get it to load right.
 // ba_outro: Not needed, just delays cutscene
 // hl_c01_a1: Not needed and not supported
-// hl_c13_a4: Level change trigger happens a long time before the level actually changes. Non-solid prevents teleport
+// hl_c13_a4: Level change trigger happens a long time before the level actually changes.
+// hl_c17/hl_c18: Not needed and doesn't work anyway
 
 class PlayerState
 {
@@ -52,7 +56,8 @@ bool has_level_end_ent = false;
 bool level_change_triggered = false;
 bool everyone_finish_triggered = false;
 bool level_change_active = false;
-bool button_touched_last = false;
+int last_touched_button_id = -1;
+int changelevel_button_id = 1337;
 Vector changelevelOri; // origin to teleport players to when changing levels with trigger_changelevel
 CScheduledFunction@ constant_check = null;
 CScheduledFunction@ change_trigger = null;
@@ -70,12 +75,14 @@ void init()
 	}
 	needs_init = false;
 	level_change_active = false;
+	changelevel_button_id = 1337;
+	last_touched_button_id = -1;
 	populatePlayerStates();
 	checkForChangelevel();
 }
 
 array<EHandle> changelevelEnts;
-EHandle changelevelBut;
+array<EHandle> changelevelButs;
 
 void getRushStats(int &out percentage, int &out neededPercent, int &out needPlayers)
 {
@@ -101,6 +108,13 @@ void getRushStats(int &out percentage, int &out neededPercent, int &out needPlay
 	percentage = finished > 0 ? int((finished / total)*100.0) : 0;
 	neededPercent = g_finishPercent.GetInt();
 	needPlayers = int(ceil(float(neededPercent/100.0) * float(total)) - int(finished)); 
+	
+	for (uint i = 0; i < changelevelButs.length(); i++)
+	{	
+		if (!changelevelButs[i])
+			continue;
+		CBaseEntity@ ent = changelevelButs[i];
+	}
 }
 
 void doCountdown(string msg, int seconds, bool everyone_finished)
@@ -156,7 +170,6 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 	
 	if (isEnough or everyoneFinished)
 	{
-		CBaseEntity@ ent = changelevelEnts[0];
 		float delay = everyoneFinished ? 3.0f : g_finishDelay.GetFloat();
 		
 		if (everyoneFinished)
@@ -170,7 +183,6 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 			doCountdown("Level changing in ", int(delay), false);
 			@change_trigger = g_Scheduler.SetTimeout("triggerNextLevel", delay, @plr);
 		}
-			
 		
 		level_change_triggered = true;
 	}
@@ -186,14 +198,26 @@ void triggerNextLevel(CBasePlayer@ plr)
 {
 	if (!level_change_triggered)
 		return;
-	if (changelevelBut and (button_touched_last or changelevelEnts.length() == 0))
+		
+	if (changelevelButs.length() > 0 and (last_touched_button_id != -1 or changelevelEnts.length() == 0))
 	{
-		CBaseEntity@ but = changelevelBut;
-		but.pev.target = but.pev.noise1;
-		g_EntityFuncs.FireTargets(but.pev.target, plr, but, USE_TOGGLE);
-		g_EntityFuncs.Remove(but);
+		// get last triggered button
+		CBaseEntity@ but = changelevelButs[0];
+		for (uint i = 0; i < changelevelButs.length(); i++)
+		{	
+			if (!changelevelButs[i])
+				continue;
+				
+			CBaseEntity@ ent = changelevelButs[i];
+			if (ent.pev.colormap == last_touched_button_id)
+				@but = @ent;
+		}
+		
+		//println("TRIGGERING " + but.pev.noise1);
+		g_EntityFuncs.FireTargets(but.pev.noise1, plr, but, USE_TOGGLE);
+		if (string(but.pev.noise2) == "trigger_once")
+			g_EntityFuncs.Remove(but);
 		level_change_active = true;
-		//println("TRIGGER: " + but.pev.noise1);
 	}
 	else if (changelevelEnts.length() > 0)
 	{
@@ -206,6 +230,8 @@ void triggerNextLevel(CBasePlayer@ plr)
 				continue;
 			CBaseEntity@ p = state.plr;
 			p.pev.solid = SOLID_SLIDEBOX;
+			p.pev.flags |= FL_DUCKING;
+			p.pev.bInDuck = 1;
 			g_EntityFuncs.SetOrigin(p, changelevelOri);
 		}
 	
@@ -214,7 +240,7 @@ void triggerNextLevel(CBasePlayer@ plr)
 			if (changelevelEnts[i])
 			{
 				CBaseEntity@ ent = changelevelEnts[i];
-				ent.pev.solid = SOLID_TRIGGER; // not SOLID_TRIGGER because that causes a "trigger in clipping list" error in of2a5
+				ent.pev.solid = SOLID_BBOX; // not SOLID_TRIGGER because that causes a "trigger in clipping list" error in of2a5
 				g_EntityFuncs.SetOrigin(ent, ent.pev.origin); // This fixes the random failures somehow. Thanks, Protector.
 			}
 		}
@@ -223,11 +249,29 @@ void triggerNextLevel(CBasePlayer@ plr)
 	}
 	else
 		g_PlayerFuncs.SayTextAll(plr, "Something went horribly wrong (trigger_changelevel disappeared?). Level change failed.");	
+
+	// enable other triggers in case there is still time to touch them (hl_c13_a4, hl_c14)
+	// TODO: Prevent triggering this multiple times
+	for (uint i = 0; i < changelevelButs.length(); i++)
+	{	
+		if (!changelevelButs[i])
+			continue;
+		CBaseEntity@ ent = changelevelButs[i];
+		ent.pev.target = ent.pev.noise1; 
+	}
+	for (uint i = 0; i < changelevelEnts.length(); i++)
+	{	
+		if (!changelevelEnts[i])
+			continue;
+		CBaseEntity@ ent = changelevelEnts[i];
+		ent.pev.solid = SOLID_BBOX;
+		g_EntityFuncs.SetOrigin(ent, ent.pev.origin);
+	}
 }
 
 void checkPlayerFinish()
 {
-	if (changelevelEnts.length() == 0)
+	if (can_rush)
 		return;
 	CBaseEntity@ ent = null;
 	do {
@@ -273,11 +317,14 @@ void checkPlayerFinish()
 				}
 			}
 			
-			bool pressedBut = changelevelBut.IsValid() && ent.pev.iuser4 == 1337;
+			// unlikely to be 100+ level change buttons, so ID range should be 1337-1437
+			// hopefully no maps set this value on the player
+			bool pressedBut = changelevelButs.length() > 0 && plr.pev.iuser4 >= 1337 and plr.pev.iuser4 <= 1437;
 			
 			if (touching or pressedBut)
 			{
-				button_touched_last = pressedBut;
+				if (pressedBut)
+					last_touched_button_id = plr.pev.iuser4;
 				plr.pev.iuser4 = 0;
 				if (!state.finished)
 				{
@@ -338,7 +385,7 @@ CBaseEntity@ getCaller(string name, bool recurse=true)
 				if (string(ent2.pev.classname).Find("func_") != 0 and string(ent2.pev.classname) != "trigger_once"
 					and string(ent2.pev.classname) != "trigger_multiple")
 				{
-					println("Found entity with no caller: " + ent2.pev.targetname + " (" + ent2.pev.classname + ")");
+					//println("Found entity with no caller: " + ent2.pev.targetname + " (" + ent2.pev.classname + ")");
 					continue;
 				}
 			}
@@ -348,15 +395,15 @@ CBaseEntity@ getCaller(string name, bool recurse=true)
 			{
 				if (isPlayerTrigger(ent2) and isPlayerTrigger(caller))
 				{
-					println("Multiple callers found " + ent2.pev.targetname + " (" + ent2.pev.classname + ") + " 
-						+ caller.pev.targetname + " (" + caller.pev.classname + ")");
-					return null; // don't handle multiple callers
+					//println("Multiple callers found " + ent2.pev.targetname + " (" + ent2.pev.classname + ") + " 
+					//	+ caller.pev.targetname + " (" + caller.pev.classname + ")");
+					return null; // don't handle multiple callers (TODO: u should tho)
 				}
 				if ((!isPlayerTrigger(ent2) and isPlayerTrigger(caller)) or 
 					(ent2.pev.classname == "path_track" and caller.pev.classname == "func_train"))
 				{
-					println("Ignoring lower priority caller: " + ent2.pev.targetname + " (" + 
-							ent2.pev.classname + ")");
+					//println("Ignoring lower priority caller: " + ent2.pev.targetname + " (" + 
+					//		ent2.pev.classname + ")");
 					continue;
 				}
 				//println("Replacing " + caller.pev.targetname + " (" + caller.pev.classname + ") WITH " 
@@ -389,7 +436,7 @@ void checkForChangelevel()
 			(ent.pev.targetname == "" or getCaller(ent.pev.targetname, false) is null))
 		{
 			// trigger-only but not triggered by anything!? (TODO: use it anyway if it's the only one)
-			println("Skipping trigger_changelevel that's not tirggered by anything");
+			//println("Skipping trigger_changelevel that's not tirggered by anything");
 			continue;
 		}
 		string tname = ent.pev.targetname;
@@ -397,7 +444,7 @@ void checkForChangelevel()
 		// check for any entities that trigger this changelevel
 		if (tname.Length() > 0)
 		{
-			println("Anything triggers?");
+			//println("Anything triggers?");
 			CBaseEntity@ ent2 = null;
 			do {
 				@ent2 = g_EntityFuncs.FindEntityByClassname(ent2, "*"); 
@@ -414,7 +461,7 @@ void checkForChangelevel()
 					//println("UHHHHHHHHHH " + ent2.pev.targetname);
 					if (string(ent2.pev.classname).Find("func_") != 0 or true)
 					{
-						println("ANYTHING CALLS? " + ent2.pev.targetname);
+						//println("ANYTHING CALLS? " + ent2.pev.targetname);
 						CBaseEntity@ caller;
 						if (string(ent2.pev.targetname).Length() > 0)
 							@caller = getCaller(ent2.pev.targetname);
@@ -432,17 +479,19 @@ void checkForChangelevel()
 						
 						if (caller !is null)
 						{
-							println("CALLER: " + caller.pev.targetname + " (" + caller.pev.classname + ")");
+							//println("CALLER: " + caller.pev.targetname + " (" + caller.pev.classname + ")");
 							if (caller.pev.classname == "func_button" or caller.pev.classname == "func_rot_button" or
 								caller.pev.classname == "trigger_once" or caller.pev.classname == "trigger_multiple")
 							{
 								CBaseToggle@ toggle = cast<CBaseToggle@>(caller);
-									string master = toggle.m_sMaster;
+								string master = toggle.m_sMaster;
+								string name = "ANTIRUSH_PLAYER_FINISH" + changelevel_button_id;
+								can_rush = false;
 										
 								if (caller.pev.classname == "func_button")
 								{
 									dictionary keys;
-									keys["target"] = string("ANTIRUSH_PLAYER_FINISH");
+									keys["target"] = name;
 									keys["noise1"] = string(caller.pev.target);
 									keys["spawnflags"] = "" + (1 + (caller.pev.spawnflags & 256));
 									keys["wait"] = "1";
@@ -452,16 +501,17 @@ void checkForChangelevel()
 									keys["rendermode"] = "" + caller.pev.rendermode;
 									keys["renderamt"] = "" + caller.pev.renderamt;
 									keys["rendercolor"] = caller.pev.rendercolor.ToString();
+									keys["colormap"] = "" + changelevel_button_id;
 									if (master.Length() > 0)
 										keys["master"] = master;
 									
 									CBaseEntity@ newButton = g_EntityFuncs.CreateEntity("func_button", keys);
-									changelevelBut = newButton;	
+									changelevelButs.insertLast(EHandle(newButton));
 								}
 								if (caller.pev.classname == "func_rot_button")
 								{
 									dictionary keys;
-									keys["target"] = string("ANTIRUSH_PLAYER_FINISH");
+									keys["target"] = name;
 									keys["noise1"] = string(caller.pev.target);
 									keys["spawnflags"] = "" + (1 + (caller.pev.spawnflags & 256));
 									keys["wait"] = "1";
@@ -471,11 +521,12 @@ void checkForChangelevel()
 									keys["rendermode"] = "" + caller.pev.rendermode;
 									keys["renderamt"] = "" + caller.pev.renderamt;
 									keys["rendercolor"] = caller.pev.rendercolor.ToString();
+									keys["colormap"] = "" + changelevel_button_id;
 									if (master.Length() > 0)
 										keys["master"] = master;
 									
 									CBaseEntity@ newButton = g_EntityFuncs.CreateEntity("func_rot_button", keys);
-									changelevelBut = newButton;	
+									changelevelButs.insertLast(EHandle(newButton));
 								}
 								if (caller.pev.classname == "trigger_once" or caller.pev.classname == "trigger_multiple")
 								{
@@ -489,27 +540,27 @@ void checkForChangelevel()
 										continue; // dont handle triggers that clients arent meant to touch
 									}
 									dictionary keys;
-									keys["target"] = string("ANTIRUSH_PLAYER_FINISH");
+									keys["target"] = name;
 									keys["noise1"] = string(caller.pev.target);
+									keys["noise2"] = string(caller.pev.classname);
 									keys["wait"] = "0.05"; // "Fire on enter" flag doesn't work on ba_outro
 									keys["model"] = string(caller.pev.model);
 									keys["origin"] = caller.pev.origin.ToString();
 									keys["angles"] = caller.pev.angles.ToString();
+									keys["colormap"] = "" + changelevel_button_id;
 									if (master.Length() > 0)
 										keys["master"] = master;
 									
 									CBaseEntity@ newButton = g_EntityFuncs.CreateEntity("trigger_multiple", keys);
-									changelevelBut = newButton;
+									changelevelButs.insertLast(EHandle(newButton));
 								}
-									
-								isTriggered = false;
 								
 								dictionary keys2;
 								//keys["target"] = string(caller.pev.target);
-								keys2["targetname"] = "ANTIRUSH_PLAYER_FINISH";
+								keys2["targetname"] = name;
 								keys2["target"] = "!activator";
 								keys2["m_iszValueName"] = "iuser4";
-								keys2["m_iszNewValue"] = "1337";
+								keys2["m_iszNewValue"] = "" + changelevel_button_id++;
 								keys2["m_iszValueType"] = "0";
 								keys2["m_trigonometricBehaviour"] = "0";
 								keys2["m_iAppendSpaces"] = "0";
@@ -519,24 +570,15 @@ void checkForChangelevel()
 							}
 						}
 					}
-					
 				}
 			} while (ent2 !is null);	
 		}			
 		
 		if (isTriggered)
 		{
-			// cant check multi_manager keys which is usually what triggers the next level
+			// triggered by a button instead of touching it
 			if (reason.Length() == 0)
 				reason = "map change sequence is too complex";
-			//can_rush = true;
-			has_level_end_ent = true;
-			//return;
-		}
-		else if (tname.Length() == 0 and false)
-		{
-			// can't set a new targetname after it spawns
-			reason = "map change entity has no targetname";
 			//can_rush = true;
 			has_level_end_ent = true;
 			//return;
@@ -546,19 +588,9 @@ void checkForChangelevel()
 			// it's a normal changelevel you just walk into
 			ent.pev.solid = SOLID_NOT;
 			changelevelEnts.insertLast(EHandle(ent));
-			//ent.pev.targetname = "maprush_plugin_trigger";
-			//g_EntityFuncs.DispatchKeyValue(ent.edict(), "targetname", "maprush_plugin_trigger");
-			/*
-			dictionary keys;
-			keys["targetname"] = "maprush_copy_val";
-			keys["target"] = "maprush_plugin_trigger";
-			keys["m_iszValueName"] = "targetname";
-			keys["m_iszNewValue"] = "maprush_plugin_trigger";
-				
-			CBaseEntity@ shootEnt = g_EntityFuncs.CreateEntity(classname, keys, false);	
-			*/
 			can_rush = false;
 			has_level_end_ent = true;
+			//println("JUST A NORMAL CHANGELEVEL");
 		}
 	} while (ent !is null);
 	
@@ -571,6 +603,8 @@ void checkForChangelevel()
 	{
 		@constant_check = g_Scheduler.SetInterval("checkPlayerFinish", 0.05);
 	}
+	
+	//println("CHANGELEVEL ENTS: " + changelevelButs.length() + ", " + changelevelEnts.length());
 }
 
 void PluginInit()
@@ -600,11 +634,13 @@ void MapInit()
 
 HookReturnCode MapChange()
 {
-	changelevelBut = null;
+	changelevelButs.resize(0);
 	changelevelEnts.resize(0);
 	needs_init = true;
 	level_change_triggered = false;
 	everyone_finish_triggered = false;
+	changelevel_button_id = 1337;
+	last_touched_button_id = -1;
 	player_states.deleteAll();
 	g_Scheduler.RemoveTimer(constant_check);
 	g_Scheduler.RemoveTimer(ten_sec_trigger);
