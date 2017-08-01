@@ -6,8 +6,7 @@
 // ba_tram1/2/3: Not needed and and not supported
 // ba_elevator: Not needed, just delays cutscene
 // ba_canal2: Level changes to whichever changelevel was touched last (potential for trolling)
-// ba_yard4: Not sure if this works in the rosenberg mode. I can't get it to load right even without antirush
-// ba_teleport2: Not sure if this works after power cell maps. Can't get it to load right.
+// ba_yard4/ba_teleport2: Not sure if this works. I can't get it to load in the other mode, even without antirush
 // ba_outro: Not needed, just delays cutscene
 // hl_c01_a1: Not needed and not supported
 // hl_c13_a4: Level change trigger happens a long time before the level actually changes.
@@ -429,6 +428,16 @@ void checkForChangelevel()
 			break;
 		if (ent.pev.classname != "trigger_changelevel" and ent.pev.classname != "game_end")
 			continue;
+			
+		// map specific fixed:
+		string cname = ent.pev.classname;
+		string mapname = g_Engine.mapname;
+		if ((mapname == "of2a4" and cname == "trigger_changelevel" and ent.pev.targetname == "vator_changer") or 
+			(mapname == "of6a4" and cname == "trigger_changelevel" and ent.pev.model == "*53"))
+		{
+			println("AntiRush: Applying map-specific fix for " + mapname);
+			continue;
+		}
 
 		found = true;
 		bool isTriggered = (ent.pev.spawnflags & 2) != 0;
