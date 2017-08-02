@@ -239,7 +239,7 @@ void triggerNextLevel(CBasePlayer@ plr)
 			if (changelevelEnts[i])
 			{
 				CBaseEntity@ ent = changelevelEnts[i];
-				ent.pev.solid = SOLID_BBOX; // not SOLID_TRIGGER because that causes a "trigger in clipping list" error in of2a5
+				ent.pev.solid = SOLID_TRIGGER;
 				g_EntityFuncs.SetOrigin(ent, ent.pev.origin); // This fixes the random failures somehow. Thanks, Protector.
 			}
 		}
@@ -263,7 +263,7 @@ void triggerNextLevel(CBasePlayer@ plr)
 		if (!changelevelEnts[i])
 			continue;
 		CBaseEntity@ ent = changelevelEnts[i];
-		ent.pev.solid = SOLID_BBOX;
+		ent.pev.solid = SOLID_TRIGGER;
 		g_EntityFuncs.SetOrigin(ent, ent.pev.origin);
 	}
 }
@@ -428,17 +428,10 @@ void checkForChangelevel()
 			break;
 		if (ent.pev.classname != "trigger_changelevel" and ent.pev.classname != "game_end")
 			continue;
-			
-		// map specific fixed:
-		string cname = ent.pev.classname;
-		string mapname = g_Engine.mapname;
-		if ((mapname == "of2a4" and cname == "trigger_changelevel" and ent.pev.targetname == "vator_changer") or 
-			(mapname == "of6a4" and cname == "trigger_changelevel" and ent.pev.model == "*53"))
-		{
-			println("AntiRush: Applying map-specific fix for " + mapname);
-			continue;
-		}
 
+		if (ent.pev.classname == "trigger_changelevel" and ent.pev.solid == SOLID_BSP)
+			continue; // changelevel disabled because it points to the previous level or something
+			
 		found = true;
 		bool isTriggered = (ent.pev.spawnflags & 2) != 0;
 		if (isTriggered and ent.pev.classname == "trigger_changelevel" and 
@@ -691,7 +684,6 @@ void populatePlayerStates()
 		}
 	} while (ent !is null);
 }
-
 
 bool doCommand(CBasePlayer@ plr, const CCommand@ args)
 {
