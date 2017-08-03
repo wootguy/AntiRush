@@ -149,9 +149,9 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 		if (alternateMode and plr !is null)
 		{
 			if (everyoneFinished)
-				g_PlayerFuncs.SayText(plr, "You finished the map.");
+				g_PlayerFuncs.SayText(plr, "You finished the map.\n");
 			else
-				g_PlayerFuncs.SayText(plr, "You finished the map. " + needPlayers + " " + plrTxt + " needed for instant level change.");
+				g_PlayerFuncs.SayText(plr, "You finished the map. " + needPlayers + " " + plrTxt + " needed for instant level change.\n");
 		}
 		return;
 	}
@@ -190,7 +190,7 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 	
 	if (percentage == 0)
 		return; // don't bother saying nobody finished
-	g_PlayerFuncs.SayTextAll(plr, msg);
+	g_PlayerFuncs.SayTextAll(plr, msg + "\n");
 }
 
 void triggerNextLevel(CBasePlayer@ plr)
@@ -247,7 +247,7 @@ void triggerNextLevel(CBasePlayer@ plr)
 		level_change_active = true;
 	}
 	else
-		g_PlayerFuncs.SayTextAll(plr, "Something went horribly wrong (trigger_changelevel disappeared?). Level change failed.");	
+		g_PlayerFuncs.SayTextAll(plr, "Something went horribly wrong (trigger_changelevel disappeared?). Level change failed.\n");	
 
 	// enable other triggers in case there is still time to touch them (hl_c13_a4, hl_c14)
 	// TODO: Prevent triggering this multiple times
@@ -694,7 +694,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args)
 		if ( args[0] == ".rush" )
 		{
 			if (can_rush)
-				g_PlayerFuncs.SayText(plr, "Anti-rush is disabled for this map (" + reason + ").");
+				g_PlayerFuncs.SayText(plr, "Anti-rush is disabled for this map (" + reason + ").\n");
 			else
 			{
 				int percentage, neededPercent, needPlayers = 0;
@@ -712,7 +712,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args)
 					msg += " You've finished already.";
 				else
 					msg += " You haven't finished yet.";
-				g_PlayerFuncs.SayText(plr, msg);
+				g_PlayerFuncs.SayText(plr, msg + "\n");
 			}
 			return true;
 		}
