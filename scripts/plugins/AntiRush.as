@@ -1,3 +1,6 @@
+// Anti Rush v8
+// https://forums.svencoop.com/showthread.php/44067-Plugin-Anti-Rush
+
 // Issues:
 // of0a0: Intro cutscene, not possible to rush this.
 // of1a5: Tram ride, not possible to rush this.
