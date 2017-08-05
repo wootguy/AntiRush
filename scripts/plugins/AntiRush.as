@@ -64,6 +64,7 @@ Vector changelevelOri; // origin to teleport players to when changing levels wit
 CScheduledFunction@ constant_check = null;
 CScheduledFunction@ change_trigger = null;
 CScheduledFunction@ ten_sec_trigger = null;
+CScheduledFunction@ teleport_failsafe = null;
 string reason = "";
 
 void init()
@@ -196,6 +197,25 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 	g_PlayerFuncs.SayTextAll(plr, msg + "\n");
 }
 
+void undo_teleport()
+{
+	array<string>@ stateKeys = player_states.getKeys();
+	CBasePlayer@ chatPlr = null;
+	for (uint i = 0; i < stateKeys.length(); i++)
+	{
+		PlayerState@ state = cast<PlayerState@>( player_states[stateKeys[i]] );
+		if (!state.plr)
+			continue;
+		CBaseEntity@ p = state.plr;
+		@chatPlr = cast<CBasePlayer@>(p);
+		p.pev.solid = SOLID_SLIDEBOX;
+		p.pev.flags |= FL_DUCKING;
+		p.pev.bInDuck = 1;
+		g_EntityFuncs.SetOrigin(p, p.pev.oldorigin);
+	}
+	g_PlayerFuncs.SayTextAll(chatPlr, "Level change trigger enabled. Reach the end of the map again to change levels.\n");
+}
+
 void triggerNextLevel(CBasePlayer@ plr)
 {
 	if (!level_change_triggered)
@@ -234,6 +254,7 @@ void triggerNextLevel(CBasePlayer@ plr)
 			p.pev.solid = SOLID_SLIDEBOX;
 			p.pev.flags |= FL_DUCKING;
 			p.pev.bInDuck = 1;
+			p.pev.oldorigin = p.pev.origin; // remember current location in case level change doesn't work
 			g_EntityFuncs.SetOrigin(p, changelevelOri);
 		}
 	
@@ -246,6 +267,8 @@ void triggerNextLevel(CBasePlayer@ plr)
 				g_EntityFuncs.SetOrigin(ent, ent.pev.origin); // This fixes the random failures somehow. Thanks, Protector.
 			}
 		}
+		
+		@teleport_failsafe = g_Scheduler.SetTimeout("undo_teleport", 1);
 		
 		level_change_active = true;
 	}
@@ -650,9 +673,11 @@ HookReturnCode MapChange()
 	g_Scheduler.RemoveTimer(constant_check);
 	g_Scheduler.RemoveTimer(ten_sec_trigger);
 	g_Scheduler.RemoveTimer(change_trigger);
+	g_Scheduler.RemoveTimer(teleport_failsafe);
 	@ten_sec_trigger = null;
 	@change_trigger = null;
 	@constant_check = null;
+	@teleport_failsafe = null;
 	return HOOK_CONTINUE;
 }
 
