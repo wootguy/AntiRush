@@ -165,6 +165,8 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 	{
 		if (everyoneFinished && percentage >= 100)
 			msg = "" + plr.pev.netname + " finished the map. Everyone has finished now. ";
+		else if (isEnough)
+			msg = "" + plr.pev.netname + " finished the map. Enough players have finished now. ";
 		else
 			msg = "" + plr.pev.netname + " finished the map. ";
 	}
@@ -174,6 +176,8 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 	if (isEnough or everyoneFinished)
 	{
 		float delay = everyoneFinished ? 3.0f : g_finishDelay.GetFloat();
+		if (delay < 3.0f)
+			delay = 3.0f;
 		
 		if (everyoneFinished)
 		{
