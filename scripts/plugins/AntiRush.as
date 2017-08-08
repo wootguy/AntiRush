@@ -1,4 +1,4 @@
-// Anti Rush v8
+// Anti Rush v9
 // https://forums.svencoop.com/showthread.php/44067-Plugin-Anti-Rush
 
 // Issues:
