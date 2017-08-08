@@ -211,9 +211,22 @@ void undo_teleport()
 		p.pev.solid = SOLID_SLIDEBOX;
 		p.pev.flags |= FL_DUCKING;
 		p.pev.bInDuck = 1;
-		g_EntityFuncs.SetOrigin(p, p.pev.oldorigin);
+		g_EntityFuncs.SetOrigin(p, p.pev.vuser3);
 	}
 	g_PlayerFuncs.SayTextAll(chatPlr, "Level change trigger enabled. Reach the end of the map again to change levels.\n");
+}
+
+void teleport_player(EHandle plr, Vector pos)
+{
+	if (!plr)
+		return;
+	CBaseEntity@ p = plr;
+	p.pev.solid = SOLID_SLIDEBOX;
+	p.pev.flags |= FL_DUCKING;
+	p.pev.bInDuck = 1;
+	p.pev.vuser3 = p.pev.origin; // remember current location in case level change doesn't work
+	Vector offset = Vector(0,0,0);//Vector(Math.RandomFloat(-1, 1), Math.RandomFloat(-1, 1), Math.RandomFloat(-1, 1));
+	g_EntityFuncs.SetOrigin(p, pos + offset);
 }
 
 void triggerNextLevel(CBasePlayer@ plr)
@@ -250,12 +263,7 @@ void triggerNextLevel(CBasePlayer@ plr)
 			PlayerState@ state = cast<PlayerState@>( player_states[stateKeys[i]] );
 			if (!state.plr)
 				continue;
-			CBaseEntity@ p = state.plr;
-			p.pev.solid = SOLID_SLIDEBOX;
-			p.pev.flags |= FL_DUCKING;
-			p.pev.bInDuck = 1;
-			p.pev.oldorigin = p.pev.origin; // remember current location in case level change doesn't work
-			g_EntityFuncs.SetOrigin(p, changelevelOri);
+			teleport_player(state.plr, changelevelOri);
 		}
 	
 		for (uint i = 0; i < changelevelEnts.length(); i++)
@@ -310,7 +318,7 @@ void checkPlayerFinish()
 			{
 				ent.pev.solid = level_change_active ? SOLID_SLIDEBOX : SOLID_NOT;
 				ent.pev.rendermode = level_change_active ? 0 : kRenderTransTexture;
-				ent.pev.renderamt = 128;
+				ent.pev.renderamt = ent.pev.renderfx == kRenderFxGlowShell ? 1 : 128;
 				//ent.pev.renderfx = kRenderFxHologram;
 				continue;
 			}
