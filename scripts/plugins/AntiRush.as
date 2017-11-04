@@ -1,4 +1,4 @@
-// Anti Rush v9
+// Anti Rush v9.2
 // https://forums.svencoop.com/showthread.php/44067-Plugin-Anti-Rush
 
 // Issues:
@@ -139,6 +139,20 @@ void doCountdown(string msg, int seconds, bool everyone_finished)
 
 void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 {
+	if (plr is null) 
+	{
+		// player left or something, so just pick someone else
+		CBaseEntity@ ent = null;
+		do {
+			@ent = g_EntityFuncs.FindEntityByClassname(ent, "player"); 
+			if (ent !is null)
+			{
+				@plr = cast<CBasePlayer@>(ent);
+				break;
+			}
+		} while (ent !is null);
+	}
+	
 	bool alternateMode = g_timerMode.GetBool();
 	
 	int percentage, neededPercent, needPlayers = 0;
@@ -183,12 +197,12 @@ void checkEnoughPlayersFinished(CBasePlayer@ plr, bool printFinished=false)
 		{
 			everyone_finish_triggered = true;
 			doCountdown("Level changing in ", 3, true);
-			g_Scheduler.SetTimeout("triggerNextLevel", 3.0f, @plr);
+			g_Scheduler.SetTimeout("triggerNextLevel", 3.0f, EHandle(plr));
 		}
 		else
 		{
 			doCountdown("Level changing in ", int(delay), false);
-			@change_trigger = g_Scheduler.SetTimeout("triggerNextLevel", delay, @plr);
+			@change_trigger = g_Scheduler.SetTimeout("triggerNextLevel", delay, EHandle(plr));
 		}
 		
 		level_change_triggered = true;
@@ -211,6 +225,8 @@ void undo_teleport()
 		if (!state.plr)
 			continue;
 		CBaseEntity@ p = state.plr;
+		if (p is null)
+			continue; // https://forums.svencoop.com/showthread.php/44067-Plugin-Anti-Rush?p=528895&viewfull=1#post528895
 		@chatPlr = cast<CBasePlayer@>(p);
 		p.pev.solid = SOLID_SLIDEBOX;
 		p.pev.flags |= FL_DUCKING;
@@ -233,8 +249,10 @@ void teleport_player(EHandle plr, Vector pos)
 	g_EntityFuncs.SetOrigin(p, pos + offset);
 }
 
-void triggerNextLevel(CBasePlayer@ plr)
+void triggerNextLevel(EHandle h_plr)
 {
+	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
+	
 	if (!level_change_triggered)
 		return;
 		
@@ -253,9 +271,14 @@ void triggerNextLevel(CBasePlayer@ plr)
 		}
 		
 		//println("TRIGGERING " + but.pev.noise1);
-		g_EntityFuncs.FireTargets(but.pev.noise1, plr, but, USE_TOGGLE);
-		if (string(but.pev.noise2) == "trigger_once")
-			g_EntityFuncs.Remove(but);
+		if (but !is null)
+		{
+			g_EntityFuncs.FireTargets(but.pev.noise1, but, but, USE_TOGGLE);
+			if (string(but.pev.noise2) == "trigger_once")
+				g_EntityFuncs.Remove(but);
+		}
+		else
+			println("Level change trigger was removed. Level change failed.");
 		level_change_active = true;
 	}
 	else if (changelevelEnts.length() > 0)
@@ -697,6 +720,7 @@ HookReturnCode ClientLeave(CBasePlayer@ plr)
 {
 	PlayerState@ state = getPlayerState(plr);
 	state.inGame = false;
+	@plr = null;
 	g_Scheduler.SetTimeout("checkEnoughPlayersFinished", 2, @plr, false);
 	return HOOK_CONTINUE;
 }
@@ -707,6 +731,7 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 		return HOOK_CONTINUE;
 	PlayerState@ state = getPlayerState(plr);
 	state.inGame = true;
+	@plr = null;
 	g_Scheduler.SetTimeout("checkEnoughPlayersFinished", 2, @plr, false);
 	return HOOK_CONTINUE;
 }
