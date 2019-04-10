@@ -700,6 +700,7 @@ HookReturnCode MapChange()
 	changelevelButs.resize(0);
 	changelevelEnts.resize(0);
 	needs_init = true;
+	can_rush = true;
 	level_change_triggered = false;
 	everyone_finish_triggered = false;
 	changelevel_button_id = 1337;
