@@ -1,4 +1,4 @@
-// Anti Rush v9.2
+// Anti Rush v10
 // https://forums.svencoop.com/showthread.php/44067-Plugin-Anti-Rush
 
 // Issues:
@@ -31,6 +31,8 @@ CCVar@ g_finishPercent;
 CCVar@ g_finishDelay;
 CCVar@ g_timerMode;
 CCVar@ g_disabled;
+
+string version_string = "10";
 
 // Will create a new state if the requested one does not exit
 PlayerState@ getPlayerState(CBasePlayer@ plr)
@@ -759,6 +761,12 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args)
 	{
 		if ( args[0] == ".rush" )
 		{
+			if (args.ArgC() > 1 and args[1] == "version")
+			{
+				g_PlayerFuncs.SayText(plr, "Anti-rush version is " + version_string + "\n");
+				return true;
+			}
+			
 			if (can_rush)
 				g_PlayerFuncs.SayText(plr, "Anti-rush is disabled for this map (" + reason + ").\n");
 			else
