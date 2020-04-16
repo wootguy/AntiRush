@@ -33,7 +33,7 @@ CCVar@ g_timerMode;
 CCVar@ g_disabled;
 CCVar@ g_nonsolid;
 
-string version_string = "10";
+string version_string = "11";
 
 // Will create a new state if the requested one does not exit
 PlayerState@ getPlayerState(CBasePlayer@ plr)
