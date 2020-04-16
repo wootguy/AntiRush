@@ -31,6 +31,7 @@ CCVar@ g_finishPercent;
 CCVar@ g_finishDelay;
 CCVar@ g_timerMode;
 CCVar@ g_disabled;
+CCVar@ g_nonsolid;
 
 string version_string = "10";
 
@@ -345,9 +346,11 @@ void checkPlayerFinish()
 			
 			if (state.finished)
 			{
-				ent.pev.solid = level_change_active ? SOLID_SLIDEBOX : SOLID_NOT;
-				ent.pev.rendermode = level_change_active ? 0 : kRenderTransTexture;
-				ent.pev.renderamt = ent.pev.renderfx == kRenderFxGlowShell ? 1 : 128;
+				if (g_nonsolid.GetInt() != 0) {
+					ent.pev.solid = level_change_active ? SOLID_SLIDEBOX : SOLID_NOT;
+					ent.pev.rendermode = level_change_active ? 0 : kRenderTransTexture;
+					ent.pev.renderamt = ent.pev.renderfx == kRenderFxGlowShell ? 1 : 128;
+				}
 				//ent.pev.renderfx = kRenderFxHologram;
 				continue;
 			}
@@ -690,6 +693,7 @@ void PluginInit()
 	@g_finishDelay = CCVar("delay", 30.0f, "Seconds to wait before changing level", ConCommandFlag::AdminOnly);
 	@g_timerMode = CCVar("mode", 1, "0 = Timer starts when 'percent' of players finish. 1 = Timer starts when first player finishes", ConCommandFlag::AdminOnly);
 	@g_disabled = CCVar("disabled", 0, "disables anti-rush for the current map", ConCommandFlag::AdminOnly);
+	@g_nonsolid = CCVar("nonsolid", 1, "make players nonsolid when they finish the map", ConCommandFlag::AdminOnly);
 }
 
 void MapInit()
