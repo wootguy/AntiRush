@@ -701,7 +701,7 @@ void MapInit()
 	g_Scheduler.SetTimeout("init", 2);
 }
 
-HookReturnCode MapChange()
+HookReturnCode MapChange(const string& in szNextMap)
 {
 	changelevelButs.resize(0);
 	changelevelEnts.resize(0);
